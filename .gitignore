@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+release/
+
+# Development
+.DS_Store
+Thumbs.db
+*.log
+*.local
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Electron
+*.asar
+
+# Test data (contains sensitive documents)
+test-documents/
+
+# User data
+userData/
+nul
