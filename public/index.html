@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pomodoro Dual</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <main class="app-shell">
+        <header class="hero">
+            <p class="kicker">Collaborative Focus Sessions</p>
+            <h1>Pomodoro Dual</h1>
+            <p class="subtitle">Create a session, share your code, and run synchronized focus cycles with friends.</p>
+        </header>
+
+        <section id="lobby" class="card">
+            <h2>Start Or Join</h2>
+            <div class="grid-two">
+                <form id="hostForm" class="stack">
+                    <h3>Host Session</h3>
+                    <label>
+                        Your Name
+                        <input id="hostName" required maxlength="40" placeholder="Session host name" />
+                    </label>
+                    <button type="submit">Create Session</button>
+                </form>
+
+                <form id="joinForm" class="stack">
+                    <h3>Join Session</h3>
+                    <label>
+                        Your Name
+                        <input id="joinName" required maxlength="40" placeholder="Your display name" />
+                    </label>
+                    <label>
+                        Session Code
+                        <input id="joinCode" required maxlength="6" placeholder="ABC123" />
+                    </label>
+                    <label>
+                        Session Passcode (optional)
+                        <input id="joinPasscode" maxlength="32" placeholder="Required only if host enabled it" />
+                    </label>
+                    <label>
+                        Host Reclaim Token (optional)
+                        <input id="joinHostToken" maxlength="600"
+                            placeholder="Only for host reclaim on another device" />
+                    </label>
+                    <button type="submit" class="alt">Join By Code</button>
+                </form>
+            </div>
+        </section>
+
+        <section id="sessionPanel" class="card hidden">
+            <div class="session-head">
+                <div>
+                    <p class="label">Session Code</p>
+                    <p id="sessionCode" class="code-pill">------</p>
+                    <div class="invite-row">
+                        <input id="inviteLink" readonly />
+                        <button id="copyInviteBtn" type="button" class="ghost">Copy Link</button>
+                    </div>
+                    <div class="invite-row">
+                        <input id="hostClaimLink" readonly />
+                        <button id="copyHostClaimBtn" type="button" class="ghost">Copy Host Reclaim Link</button>
+                    </div>
+                </div>
+                <div>
+                    <p class="label">Your Role</p>
+                    <p id="roleBadge" class="role-pill">viewer</p>
+                    <p id="lockState" class="muted">Join lock: Off</p>
+                </div>
+            </div>
+
+            <div class="timer-wrap">
+                <p id="modePill" class="mode-pill">FOCUS</p>
+                <p id="countdown" class="countdown">25:00</p>
+                <div class="progress-track">
+                    <div id="pomodoroProgressBar" class="progress-bar"></div>
+                </div>
+                <div class="controls compact">
+                    <button id="focusModeBtn" type="button" class="ghost">Focus</button>
+                    <button id="shortBreakModeBtn" type="button" class="ghost">Short Break</button>
+                    <button id="longBreakModeBtn" type="button" class="ghost">Long Break</button>
+                </div>
+            </div>
+
+            <div class="stats grid-three">
+                <article>
+                    <p class="label">Active Task</p>
+                    <p id="taskLabel">-</p>
+                </article>
+                <article>
+                    <p class="label">Completed</p>
+                    <p id="completedLabel">0</p>
+                </article>
+                <article>
+                    <p class="label">Remaining</p>
+                    <p id="remainingLabel">4</p>
+                </article>
+            </div>
+
+            <div class="controls">
+                <button id="startBtn">Start</button>
+                <button id="stopBtn" class="alt">Stop</button>
+                <button id="resetBtn" class="ghost">Reset</button>
+            </div>
+
+            <div class="grid-two">
+                <div class="stack">
+                    <h3>Tasks</h3>
+                    <label>
+                        New Task
+                        <input id="newTaskInput" maxlength="120" placeholder="Add a task for the session" />
+                    </label>
+                    <button id="addTaskBtn" type="button">Add Task</button>
+                    <div id="tasksList" class="tasks-list"></div>
+                </div>
+
+                <div class="stack">
+                    <h3>Pomodoro Settings</h3>
+                    <label>
+                        Focus Minutes
+                        <input id="focusMinutesInput" type="number" min="1" max="120" />
+                    </label>
+                    <label>
+                        Short Break Minutes
+                        <input id="shortBreakMinutesInput" type="number" min="1" max="60" />
+                    </label>
+                    <label>
+                        Long Break Minutes
+                        <input id="longBreakMinutesInput" type="number" min="1" max="90" />
+                    </label>
+                    <label>
+                        Long Break Every N Focus Sessions
+                        <input id="longBreakEveryInput" type="number" min="2" max="12" />
+                    </label>
+                    <label>
+                        Target Pomodoros
+                        <input id="targetPomodorosInput" type="number" min="1" max="24" />
+                    </label>
+                    <label>
+                        Completed Pomodoros
+                        <input id="completedPomodorosInput" type="number" min="0" max="1000" />
+                    </label>
+                    <button id="saveSettingsBtn" class="alt">Save Settings</button>
+                    <label>
+                        Join Passcode (host only)
+                        <input id="hostPasscodeInput" maxlength="32" placeholder="Set 4-32 chars to lock joins" />
+                    </label>
+                    <div class="controls">
+                        <button id="setPasscodeBtn" type="button">Set/Update Passcode</button>
+                        <button id="clearPasscodeBtn" type="button" class="ghost">Clear Passcode</button>
+                    </div>
+                </div>
+
+                <div>
+                    <h3>Participants</h3>
+                    <p class="muted">Host can set each participant as viewer or editor.</p>
+                    <div id="participantsList" class="participants"></div>
+                </div>
+            </div>
+
+            <div class="activity-wrap">
+                <h3>Session Activity</h3>
+                <p class="muted">Live timeline of joins, role changes, timer actions, and updates.</p>
+                <div id="activityList" class="activity-list"></div>
+            </div>
+        </section>
+
+        <p id="statusLine" class="status">Not connected</p>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,19 @@
+{
+    "name": "pomodoro-dual",
+    "version": "1.0.0",
+    "description": "Collaborative Pomodoro app with shareable sessions and role-based editing",
+    "main": "server.js",
+    "engines": {
+        "node": ">=20"
+    },
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node --watch server.js",
+        "healthcheck": "node -e \"fetch('http://localhost:' + (process.env.PORT || 3000) + '/healthz').then(r => { if (!r.ok) process.exit(1); console.log('ok'); })\""
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.99.1",
+        "express": "^4.21.2",
+        "ws": "^8.18.0"
+    }
+}
