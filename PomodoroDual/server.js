@@ -24,7 +24,7 @@ const wss = new WebSocketServer({ server });
 
 const sessions = new Map();
 const clients = new Map();
-const HOST_RECONNECT_GRACE_MS = 20 * 1000;
+const HOST_RECONNECT_GRACE_MS = Number(process.env.HOST_RECONNECT_GRACE_MS || 2 * 60 * 60 * 1000);
 const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const ACTIVITY_MAX_ITEMS = 60;
 const WS_HEARTBEAT_MS = 25 * 1000;
@@ -442,6 +442,7 @@ function removeClientFromSession(userKey, sessionCode) {
         session.hostDisconnectedAt = Date.now();
         if (session.hostDisconnectTimer) {
             clearTimeout(session.hostDisconnectTimer);
+            session.hostDisconnectTimer = null;
         }
 
         session.hostDisconnectTimer = setTimeout(() => {
@@ -449,22 +450,15 @@ function removeClientFromSession(userKey, sessionCode) {
             if (!live) return;
             const hostOnline = live.connections.has(live.hostKey);
             if (hostOnline) return;
-
-            for (const [, peerWs] of live.connections.entries()) {
-                send(peerWs, {
-                    type: "session:ended",
-                    reason: "The host left and did not reconnect in time. Session ended.",
-                });
-            }
-            sessions.delete(sessionCode);
-            schedulePersistSessions();
+            logSessionActivity(
+                live,
+                "Host has been offline for a while. Session stays restorable until idle cleanup.",
+                "warning"
+            );
+            live.hostDisconnectTimer = null;
+            touchSession(live);
+            broadcastSession(live);
         }, HOST_RECONNECT_GRACE_MS);
-    }
-
-    if (session.connections.size === 0 && !session.hostDisconnectTimer) {
-        sessions.delete(sessionCode);
-        schedulePersistSessions();
-        return;
     }
 
     touchSession(session);

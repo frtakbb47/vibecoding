@@ -62,6 +62,7 @@ let currentSession = null;
 let previousMode = null;
 const USER_KEY_STORAGE = "pomodoroDualUserKey";
 const HOST_TOKEN_STORAGE = "pomodoroDualHostTokens";
+const LAST_SESSION_STORAGE = "pomodoroDualLastSession";
 
 function getOrCreateUserKey() {
     const existing = localStorage.getItem(USER_KEY_STORAGE);
@@ -89,6 +90,48 @@ function setStoredHostToken(code, token) {
 
 function getStoredHostToken(code) {
     return getStoredHostTokens()[code] || "";
+}
+
+function saveLastSessionContext() {
+    if (!lastJoinCode) return;
+    localStorage.setItem(
+        LAST_SESSION_STORAGE,
+        JSON.stringify({
+            code: lastJoinCode,
+            name: currentUserName || "Guest",
+            passcode: lastJoinPasscode || "",
+            hostToken: lastJoinHostToken || "",
+            updatedAt: Date.now(),
+        })
+    );
+}
+
+function clearLastSessionContext() {
+    localStorage.removeItem(LAST_SESSION_STORAGE);
+}
+
+function restoreLastSessionContext() {
+    try {
+        const raw = localStorage.getItem(LAST_SESSION_STORAGE);
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed?.code) return;
+
+        lastJoinCode = String(parsed.code).trim().toUpperCase();
+        currentUserName = (parsed.name || "Guest").toString();
+        lastJoinPasscode = (parsed.passcode || "").toString();
+        lastJoinHostToken = (parsed.hostToken || "").toString();
+
+        dom.joinCode.value = lastJoinCode;
+        if (currentUserName && currentUserName !== "Guest") {
+            dom.joinName.value = currentUserName;
+        }
+        if (lastJoinPasscode) dom.joinPasscode.value = lastJoinPasscode;
+        if (lastJoinHostToken) dom.joinHostToken.value = lastJoinHostToken;
+    } catch {
+        // ignore malformed storage
+    }
 }
 
 function setStatus(text, kind = "") {
@@ -300,6 +343,7 @@ function renderSession() {
 
     dom.sessionCode.textContent = code;
     lastJoinCode = code;
+    saveLastSessionContext();
     dom.inviteLink.value = `${location.origin}/?code=${encodeURIComponent(code)}`;
 
     const hostToken = getStoredHostToken(code);
@@ -354,6 +398,7 @@ function renderSession() {
 function tryAutoRejoin() {
     if (!lastJoinCode || !currentUserName) return;
 
+    saveLastSessionContext();
     emit("session:join", {
         name: currentUserName,
         code: lastJoinCode,
@@ -414,6 +459,12 @@ function connectSocket() {
         }
 
         if (data.type === "error") {
+            if (typeof data.message === "string" && data.message.includes("Session code not found")) {
+                lastJoinCode = "";
+                lastJoinPasscode = "";
+                lastJoinHostToken = "";
+                clearLastSessionContext();
+            }
             setStatus(data.message, "error");
         }
 
@@ -421,6 +472,9 @@ function connectSocket() {
             currentSession = null;
             previousMode = null;
             lastJoinCode = "";
+            lastJoinPasscode = "";
+            lastJoinHostToken = "";
+            clearLastSessionContext();
             dom.sessionPanel.classList.add("hidden");
             dom.lobby.classList.remove("hidden");
             dom.participantsList.innerHTML = "";
@@ -442,14 +496,12 @@ function connectSocket() {
     });
 }
 
-connectSocket();
-resetDocumentTitle();
-
 dom.hostForm.addEventListener("submit", (e) => {
     e.preventDefault();
     currentUserName = dom.hostName.value.trim() || "Host";
     lastJoinPasscode = "";
     lastJoinHostToken = "";
+    saveLastSessionContext();
     emit("host:create", {
         name: currentUserName,
         userKey,
@@ -462,6 +514,7 @@ dom.joinForm.addEventListener("submit", (e) => {
     lastJoinCode = dom.joinCode.value.trim().toUpperCase();
     lastJoinPasscode = dom.joinPasscode.value;
     lastJoinHostToken = dom.joinHostToken.value;
+    saveLastSessionContext();
     emit("session:join", {
         name: currentUserName,
         code: lastJoinCode,
@@ -558,9 +611,22 @@ const params = new URLSearchParams(location.search);
 const urlCode = params.get("code");
 const urlHostToken = params.get("hostToken");
 
+restoreLastSessionContext();
+
 if (urlCode) {
     dom.joinCode.value = urlCode.trim().toUpperCase().slice(0, 6);
+    lastJoinCode = dom.joinCode.value;
     const storedToken = getStoredHostToken(dom.joinCode.value);
     if (storedToken) dom.joinHostToken.value = storedToken;
 }
-if (urlHostToken) dom.joinHostToken.value = urlHostToken;
+if (urlHostToken) {
+    dom.joinHostToken.value = urlHostToken;
+    lastJoinHostToken = urlHostToken;
+}
+
+if (lastJoinCode) {
+    saveLastSessionContext();
+}
+
+connectSocket();
+resetDocumentTitle();
