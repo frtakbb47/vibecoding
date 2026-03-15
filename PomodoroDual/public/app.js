@@ -48,7 +48,15 @@ const dom = {
 };
 
 const socketProtocol = location.protocol === "https:" ? "wss" : "ws";
-const ws = new WebSocket(`${socketProtocol}://${location.host}`);
+let ws = null;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+const HEARTBEAT_MS = 20 * 1000;
+let heartbeatTimer = null;
+let currentUserName = "Guest";
+let lastJoinCode = "";
+let lastJoinPasscode = "";
+let lastJoinHostToken = "";
 
 let currentSession = null;
 let previousMode = null;
@@ -95,6 +103,21 @@ function formatTime(seconds) {
     return `${mm}:${ss}`;
 }
 
+function resetDocumentTitle() {
+    document.title = "Pomodoro Dual";
+}
+
+function updateDocumentTitle(state) {
+    if (!state) {
+        resetDocumentTitle();
+        return;
+    }
+
+    const modeLabel = state.mode === "shortBreak" ? "Short Break" : state.mode === "longBreak" ? "Long Break" : "Focus";
+    const runningDot = state.isRunning ? "●" : "○";
+    document.title = `${runningDot} ${formatTime(state.remainingSec)} • ${modeLabel} • Pomodoro Dual`;
+}
+
 function formatClock(ms) {
     const d = new Date(ms);
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -115,7 +138,7 @@ function notifyPhaseChange(mode) {
 }
 
 function emit(type, payload = {}) {
-    if (ws.readyState !== ws.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type, ...payload }));
 }
 
@@ -276,6 +299,7 @@ function renderSession() {
     dom.sessionPanel.classList.remove("hidden");
 
     dom.sessionCode.textContent = code;
+    lastJoinCode = code;
     dom.inviteLink.value = `${location.origin}/?code=${encodeURIComponent(code)}`;
 
     const hostToken = getStoredHostToken(code);
@@ -324,70 +348,125 @@ function renderSession() {
     renderTasks();
     renderParticipants();
     renderActivity();
+    updateDocumentTitle(state);
 }
 
-ws.addEventListener("open", () => {
-    setStatus("Connected. Create or join a session.", "good");
-});
+function tryAutoRejoin() {
+    if (!lastJoinCode || !currentUserName) return;
 
-ws.addEventListener("message", (event) => {
-    const data = JSON.parse(event.data);
+    emit("session:join", {
+        name: currentUserName,
+        code: lastJoinCode,
+        passcode: lastJoinPasscode,
+        hostClaimToken: lastJoinHostToken || getStoredHostToken(lastJoinCode),
+        userKey,
+    });
+}
 
-    if (data.type === "session:host-token-issued") {
-        if (data.code && data.token) {
-            setStoredHostToken(data.code, data.token);
-            if (currentSession && currentSession.code === data.code) {
-                renderSession();
-                setStatus("Host reclaim token updated.", "good");
+function startHeartbeat() {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+        emit("client:ping", { t: Date.now() });
+    }, HEARTBEAT_MS);
+}
+
+function connectSocket() {
+    ws = new WebSocket(`${socketProtocol}://${location.host}`);
+
+    ws.addEventListener("open", () => {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        reconnectAttempt = 0;
+        setStatus("Connected. Session synced live.", "good");
+        startHeartbeat();
+        if (lastJoinCode) {
+            tryAutoRejoin();
+        }
+    });
+
+    ws.addEventListener("message", (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "session:host-token-issued") {
+            if (data.code && data.token) {
+                setStoredHostToken(data.code, data.token);
+                if (currentSession && currentSession.code === data.code) {
+                    renderSession();
+                    setStatus("Host reclaim token updated.", "good");
+                }
             }
         }
-    }
 
-    if (data.type === "session:update") {
-        currentSession = data.session;
-        if (previousMode && previousMode !== currentSession.state.mode) {
-            notifyPhaseChange(currentSession.state.mode);
+        if (data.type === "session:update") {
+            currentSession = data.session;
+            const me = currentSession.participants.find((p) => p.id === currentSession.you.id);
+            if (me?.name) {
+                currentUserName = me.name;
+            }
+            if (previousMode && previousMode !== currentSession.state.mode) {
+                notifyPhaseChange(currentSession.state.mode);
+            }
+            previousMode = currentSession.state.mode;
+            renderSession();
+            setStatus("Session synchronized.", "good");
         }
-        previousMode = currentSession.state.mode;
-        renderSession();
-        setStatus("Session synchronized.", "good");
-    }
 
-    if (data.type === "error") {
-        setStatus(data.message, "error");
-    }
+        if (data.type === "error") {
+            setStatus(data.message, "error");
+        }
 
-    if (data.type === "session:ended") {
-        currentSession = null;
-        previousMode = null;
-        dom.sessionPanel.classList.add("hidden");
-        dom.lobby.classList.remove("hidden");
-        dom.participantsList.innerHTML = "";
-        dom.activityList.innerHTML = "";
-        dom.tasksList.innerHTML = "";
-        setStatus(data.reason, "error");
-    }
-});
+        if (data.type === "session:ended") {
+            currentSession = null;
+            previousMode = null;
+            lastJoinCode = "";
+            dom.sessionPanel.classList.add("hidden");
+            dom.lobby.classList.remove("hidden");
+            dom.participantsList.innerHTML = "";
+            dom.activityList.innerHTML = "";
+            dom.tasksList.innerHTML = "";
+            resetDocumentTitle();
+            setStatus(data.reason, "error");
+        }
+    });
 
-ws.addEventListener("close", () => {
-    setStatus("Connection lost. Refresh to reconnect.", "error");
-});
+    ws.addEventListener("close", () => {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        setStatus("Connection lost. Reconnecting...", "error");
+        document.title = "Reconnecting... • Pomodoro Dual";
+
+        const delay = Math.min(10000, 1000 * 2 ** reconnectAttempt);
+        reconnectAttempt += 1;
+        reconnectTimer = setTimeout(connectSocket, delay);
+    });
+}
+
+connectSocket();
+resetDocumentTitle();
 
 dom.hostForm.addEventListener("submit", (e) => {
     e.preventDefault();
+    currentUserName = dom.hostName.value.trim() || "Host";
+    lastJoinPasscode = "";
+    lastJoinHostToken = "";
     emit("host:create", {
-        name: dom.hostName.value.trim() || "Host",
+        name: currentUserName,
         userKey,
     });
 });
 
 dom.joinForm.addEventListener("submit", (e) => {
     e.preventDefault();
+    currentUserName = dom.joinName.value.trim() || "Guest";
+    lastJoinCode = dom.joinCode.value.trim().toUpperCase();
+    lastJoinPasscode = dom.joinPasscode.value;
+    lastJoinHostToken = dom.joinHostToken.value;
     emit("session:join", {
-        name: dom.joinName.value.trim() || "Guest",
-        code: dom.joinCode.value.trim().toUpperCase(),
-        passcode: dom.joinPasscode.value,
-        hostClaimToken: dom.joinHostToken.value,
+        name: currentUserName,
+        code: lastJoinCode,
+        passcode: lastJoinPasscode,
+        hostClaimToken: lastJoinHostToken,
         userKey,
     });
 });

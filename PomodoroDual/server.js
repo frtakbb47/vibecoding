@@ -27,6 +27,7 @@ const clients = new Map();
 const HOST_RECONNECT_GRACE_MS = 20 * 1000;
 const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const ACTIVITY_MAX_ITEMS = 60;
+const WS_HEARTBEAT_MS = 25 * 1000;
 const HOST_TOKEN_SECRET =
     process.env.HOST_TOKEN_SECRET || crypto.randomBytes(32).toString("hex");
 if (process.env.NODE_ENV === "production" && !process.env.HOST_TOKEN_SECRET) {
@@ -45,6 +46,18 @@ const supabase = hasSupabaseConfig
 const dataDir = path.join(__dirname, "data");
 const sessionsFile = path.join(dataDir, "sessions.json");
 let saveTimer = null;
+
+setInterval(() => {
+    wss.clients.forEach((socket) => {
+        if (socket.isAlive === false) {
+            socket.terminate();
+            return;
+        }
+
+        socket.isAlive = false;
+        socket.ping();
+    });
+}, WS_HEARTBEAT_MS);
 
 function randomCode(length = 6) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -634,6 +647,10 @@ setInterval(() => {
 
 wss.on("connection", (ws) => {
     const clientId = crypto.randomUUID();
+    ws.isAlive = true;
+    ws.on("pong", () => {
+        ws.isAlive = true;
+    });
     clients.set(clientId, { ws, sessionCode: null, name: "Guest", userKey: null });
 
     send(ws, { type: "connected", clientId });
@@ -649,6 +666,11 @@ wss.on("connection", (ws) => {
 
         const client = clients.get(clientId);
         if (!client) return;
+
+        if (msg.type === "client:ping") {
+            send(ws, { type: "server:pong", t: Date.now() });
+            return;
+        }
 
         if (msg.type === "host:create") {
             const name = (msg.name || "Host").toString().slice(0, 40);
