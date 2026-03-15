@@ -28,6 +28,7 @@ const HOST_RECONNECT_GRACE_MS = Number(process.env.HOST_RECONNECT_GRACE_MS || 2 
 const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const ACTIVITY_MAX_ITEMS = 60;
 const WS_HEARTBEAT_MS = 25 * 1000;
+const PRESENCE_LEASE_MS = Number(process.env.PRESENCE_LEASE_MS || 15 * 60 * 1000);
 const HOST_TOKEN_SECRET =
     process.env.HOST_TOKEN_SECRET || crypto.randomBytes(32).toString("hex");
 if (process.env.NODE_ENV === "production" && !process.env.HOST_TOKEN_SECRET) {
@@ -173,6 +174,23 @@ function getParticipantLabel(session, userKey, fallback = "Someone") {
     return participant?.name || fallback;
 }
 
+function isParticipantActive(session, userKey) {
+    const participant = session.participants.get(userKey);
+    if (!participant) return false;
+    if (session.connections.has(userKey)) return true;
+    return Date.now() - (participant.lastSeenAt || 0) < PRESENCE_LEASE_MS;
+}
+
+function markParticipantAlive(session, userKey, name) {
+    const participant = session.participants.get(userKey);
+    if (!participant) return;
+    if (typeof name === "string" && name.trim()) {
+        participant.name = name.trim().slice(0, 40);
+    }
+    participant.connected = true;
+    participant.lastSeenAt = Date.now();
+}
+
 function logSessionActivity(session, message, type = "info") {
     session.activity.unshift({
         at: Date.now(),
@@ -259,6 +277,7 @@ function toPersistableSession(session) {
                 name: participant.name,
                 role: participant.role,
                 connected: false,
+                lastSeenAt: participant.lastSeenAt || 0,
             },
         ]),
         state: session.state,
@@ -314,6 +333,7 @@ function hydrateSession(raw) {
                 name: (p.name || "Guest").toString().slice(0, 40),
                 role: p.role === "editor" || p.role === "host" ? p.role : "viewer",
                 connected: false,
+                lastSeenAt: Number(p.lastSeenAt) || Date.now(),
             });
         }
     }
@@ -323,6 +343,7 @@ function hydrateSession(raw) {
             name: "Host",
             role: "host",
             connected: false,
+            lastSeenAt: Date.now(),
         });
     }
 
@@ -412,7 +433,8 @@ function serializeSessionFor(session, userKey) {
             id,
             name: p.name,
             role: id === session.hostKey ? "host" : p.role,
-            connected: Boolean(p.connected),
+            connected: isParticipantActive(session, id),
+            socketConnected: session.connections.has(id),
         })),
         state: {
             ...session.state,
@@ -436,6 +458,7 @@ function removeClientFromSession(userKey, sessionCode) {
     const participant = session.participants.get(userKey);
     if (participant) {
         participant.connected = false;
+        participant.lastSeenAt = Date.now();
     }
 
     if (userKey === session.hostKey) {
@@ -662,6 +685,12 @@ wss.on("connection", (ws) => {
         if (!client) return;
 
         if (msg.type === "client:ping") {
+            if (client.sessionCode && client.userKey) {
+                const currentSession = sessions.get(client.sessionCode);
+                if (currentSession) {
+                    markParticipantAlive(currentSession, client.userKey);
+                }
+            }
             send(ws, { type: "server:pong", t: Date.now() });
             return;
         }
@@ -690,7 +719,7 @@ wss.on("connection", (ws) => {
                 updatedAt: Date.now(),
             };
 
-            session.participants.set(userKey, { name, role: "host", connected: true });
+            session.participants.set(userKey, { name, role: "host", connected: true, lastSeenAt: Date.now() });
             session.connections.set(userKey, ws);
             sessions.set(code, session);
 
@@ -753,17 +782,17 @@ wss.on("connection", (ws) => {
             }
 
             if (existing) {
-                existing.name = name;
+                markParticipantAlive(session, userKey, name);
                 if (session.hostKey === userKey) {
                     existing.role = "host";
                 }
-                existing.connected = true;
                 logSessionActivity(session, `${name} reconnected.`);
             } else {
                 session.participants.set(userKey, {
                     name,
                     role: session.hostKey === userKey ? "host" : "viewer",
                     connected: true,
+                    lastSeenAt: Date.now(),
                 });
                 logSessionActivity(
                     session,

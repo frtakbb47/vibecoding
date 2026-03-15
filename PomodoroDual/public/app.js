@@ -415,7 +415,29 @@ function startHeartbeat() {
     }, HEARTBEAT_MS);
 }
 
+function wakeRealtime(reason) {
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        connectSocket();
+        return;
+    }
+
+    if (ws.readyState === WebSocket.OPEN) {
+        emit("client:ping", { reason, t: Date.now() });
+        if (!currentSession && lastJoinCode) {
+            tryAutoRejoin();
+        }
+    }
+}
+
 function connectSocket() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
     ws = new WebSocket(`${socketProtocol}://${location.host}`);
 
     ws.addEventListener("open", () => {
@@ -605,6 +627,24 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "1") emit("state:update", { patch: { mode: "focus" } });
     if (event.key === "2") emit("state:update", { patch: { mode: "shortBreak" } });
     if (event.key === "3") emit("state:update", { patch: { mode: "longBreak" } });
+});
+
+window.addEventListener("focus", () => {
+    wakeRealtime("focus");
+});
+
+window.addEventListener("online", () => {
+    wakeRealtime("online");
+});
+
+window.addEventListener("pageshow", () => {
+    wakeRealtime("pageshow");
+});
+
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+        wakeRealtime("visible");
+    }
 });
 
 const params = new URLSearchParams(location.search);
